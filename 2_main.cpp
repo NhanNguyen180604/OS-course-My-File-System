@@ -1,18 +1,10 @@
 #include <fstream>
-
-#define FS_NAME "MyFS.Dat"
-#define BYTES_PER_SECTOR 512  //2 bytes
-#define SECTORS_PER_CLUSTER 4  //1 byte
-#define SECTORS_BEFORE_FAT 1 //1 byte
-#define NUMBER_OF_FAT 2 //1 byte
-#define FAT_SIZE 4081  //2 byte, each entry in FAT takes up 4 bytes
-#define FAT_ENTRY_SIZE 4
-#define FREE 0 //free cluster in FAT
-#define VOLUME_SIZE 2097152 //4 bytes, size in sector
+#include <iostream>
+#include "MyFileSystem.h"
 
 void CreateFS()
 {
-    std::ofstream file(FS_NAME, std::ios::binary | std::ios::out | std::ios::trunc);
+    std::ofstream file(FS_PATH, std::ios::binary | std::ios::out | std::ios::trunc);
     file.seekp(VOLUME_SIZE * BYTES_PER_SECTOR - 1);
     const char data = 0;
     file.write(&data, 1);
@@ -21,7 +13,7 @@ void CreateFS()
 
 void WriteBootSector()
 {
-    std::fstream file(FS_NAME, std::ios::binary | std::ios::in | std::ios::out);
+    std::fstream file(FS_PATH, std::ios::binary | std::ios::in | std::ios::out);
 
     unsigned int data = BYTES_PER_SECTOR;
     file.write((char*)&data, 2);
@@ -44,9 +36,24 @@ void WriteBootSector()
     file.close();
 }
 
+bool CheckFSExists()
+{
+    std::ifstream f;
+    f.open(FS_PATH);
+    bool result = (bool)f;
+    f.close();
+    return result;
+}
+
 int main()
 {
-    CreateFS();
-    WriteBootSector();
+    if (!CheckFSExists())
+    {
+        std::cout << "Creating File System file" << '\n';
+        CreateFS();
+        WriteBootSector();
+    }
+
+    MyFileSystem myFS;
     return 0;
 }
