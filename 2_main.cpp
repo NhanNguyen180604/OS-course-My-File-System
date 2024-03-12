@@ -55,5 +55,6 @@ int main()
     }
 
     MyFileSystem myFS;
+    myFS.test();
     return 0;
 }
