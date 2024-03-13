@@ -45,7 +45,6 @@ MyFileSystem::MyFileSystem()
     f.read((char*)&bytesPerSector, 2);
     f.read((char*)&sectorsPerCluster, 1);
     f.read((char*)&sectorsBeforeFat, 1);
-    f.read((char*)&numberOfFat, 1);
     f.read((char*)&fatSize, 2);
     f.read((char*)&volumeSize, 4);
 }
@@ -53,6 +52,33 @@ MyFileSystem::MyFileSystem()
 MyFileSystem::~MyFileSystem()
 {
     f.close();
+}
+
+bool MyFileSystem::CheckDuplicateName(Entry *&entry, unsigned int &lastCluster, unsigned int &lastOffset)
+{
+    std::vector<unsigned int> rdetClusters = ReadFAT(lastCluster);
+    for (unsigned int cluster : rdetClusters)
+    {
+        lastCluster = cluster;
+        unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (cluster - STARTING_CLUSTER);
+        unsigned int bytesOffset;
+        if (lastOffset == 0)
+            bytesOffset = sectorOffset * bytesPerSector;
+        else bytesOffset = lastOffset;
+        unsigned int limitOffset = bytesOffset + bytesPerSector * sectorsPerCluster;  //start of next cluster
+        for (; bytesOffset < limitOffset; bytesOffset += sizeof(Entry))
+        {
+            lastOffset = bytesOffset;
+            std::vector<char> tempEntry = ReadBlock(bytesOffset, sizeof(Entry));
+            //sign of erased file
+            if (tempEntry[0] == -27)
+                continue;
+            //if duplicated
+            if (std::string(tempEntry.begin(), tempEntry.begin() + 40) == entry->name)
+                return true;
+        }
+    }
+    return false;
 }
 
 std::vector<unsigned int> MyFileSystem::ReadFAT(unsigned int startingCluster)
@@ -73,28 +99,101 @@ std::vector<unsigned int> MyFileSystem::ReadFAT(unsigned int startingCluster)
     return result;
 }
 
-bool MyFileSystem::CheckDuplicateShortName(const std::string& name)
+std::vector<unsigned int> MyFileSystem::GetFreeClusters(unsigned int n)
 {
-    std::vector<unsigned int> rdetClusters = ReadFAT(2);
+    std::vector<unsigned int> result;
+    //cluster for actual file's data starts from 3
+    unsigned int cluster = STARTING_CLUSTER + 1;
+    f.seekp(sectorsBeforeFat * bytesPerSector + cluster * FAT_ENTRY_SIZE, f.beg);
+    while (n && cluster <= FINAL_CLUSTER)
+    {
+        unsigned int nextCluster = 0;
+        f.read((char*)&nextCluster, FAT_ENTRY_SIZE);
+        if (nextCluster == 0)
+        {
+            n--;
+            result.push_back(cluster);
+        }
+        cluster++;
+    }
+    if (n)
+        return {};
+    return result;
+}
+
+void MyFileSystem::WriteClustersToFAT(const std::vector<unsigned int>& clusters)
+{
+    int i = 0;
+    while (i < clusters.size() - 1)
+    {
+        unsigned int offset = sectorsBeforeFat * bytesPerSector + clusters[i] * fatEntrySize;
+        f.seekp(offset, f.beg);
+        f.write((char*)&clusters[i + 1], fatEntrySize);
+        i++;
+    }
+    unsigned int data = MY_EOF;
+    unsigned int offset = sectorsBeforeFat * bytesPerSector + clusters[i] * fatEntrySize;
+    f.seekp(offset);
+    f.write((char*)&data, fatEntrySize);
+    f.flush();
+}
+
+bool MyFileSystem::WriteFileEntry(Entry *&entry)
+{
+    std::vector<unsigned int> rdetClusters = ReadFAT(STARTING_CLUSTER);
     for (unsigned int cluster : rdetClusters)
     {
-        unsigned int clusterOffset = sectorsBeforeFat + numberOfFat * fatSize + sectorsPerCluster * (cluster - STARTING_CLUSTER);
-        clusterOffset *= bytesPerSector;
-        for (int i = 0; i < bytesPerSector * sectorsPerCluster / sizeof(MainEntry); i++)
+        unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (cluster - STARTING_CLUSTER);
+        unsigned int bytesOffset = sectorOffset * bytesPerSector;
+        unsigned int limitOffset = bytesOffset + bytesPerSector * sectorsPerCluster;  //start of next cluster
+        for (; bytesOffset < limitOffset; bytesOffset += sizeof(Entry))
         {
-            std::vector<char> entry = ReadBlock(clusterOffset, sizeof(MainEntry));
-            //sign of long entry or erased file
-            if (entry[11] == 15 || entry[0] == -27)
-                continue;
-            //if duplicated
-            if (std::string(entry.begin(), entry.begin() + 8) == name)
+            std::vector<char> tempEntry = ReadBlock(bytesOffset, sizeof(Entry));
+            if (tempEntry[0] == 0)
+            {
+                f.seekp(bytesOffset, f.beg);
+                f.write((char*)entry, sizeof(Entry));
+                f.flush();
                 return true;
-            //if empty entry
-            if (entry[0] == 0)
-                break;
+            }
         }
     }
-    return false;
+
+    //if out of space, append another cluster for RDET
+    std::vector<unsigned int> newFreeCluster = GetFreeClusters(1);  //starting cluster is for RDET
+    if (newFreeCluster.empty())
+        return false;
+
+    //write to FAT new cluster of RDET
+    unsigned int offset = sectorsBeforeFat * bytesPerSector + rdetClusters[rdetClusters.size() - 1] * fatEntrySize;
+    f.seekp(offset, f.beg);
+    f.write((char*)&newFreeCluster[0], f.beg);
+    offset = sectorsBeforeFat * bytesPerSector + newFreeCluster[0] * fatEntrySize;
+    f.seekp(offset, f.beg);
+    unsigned int eof = MY_EOF;
+    f.write((char*)&eof, sizeof(FAT_ENTRY_SIZE));
+
+    //write entry to new cluster
+    unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (newFreeCluster[0] - STARTING_CLUSTER);
+    unsigned int bytesOffset = sectorOffset * bytesPerSector;
+    f.seekp(bytesOffset, f.beg);
+    f.write((char*)entry, sizeof(Entry));
+    f.flush();
+    return true;
+}
+
+void MyFileSystem::WriteFileContent(std::ifstream& fin, const std::vector<unsigned int>& clusters)
+{
+    for (unsigned int cluster : clusters)
+    {
+        const unsigned int clusterSize = bytesPerSector * sectorsPerCluster;
+        std::vector<char> data(clusterSize, 0);
+        fin.read(&data[0], clusterSize);
+        unsigned int sectorOffset = sectorsBeforeFat + fatSize + (cluster - STARTING_CLUSTER) * sectorsPerCluster;
+        unsigned int bytesOffset = sectorOffset * bytesPerSector;
+        f.seekp(bytesOffset, f.beg);
+        f.write(&data[0], clusterSize);
+    }
 }
 
 void MyFileSystem::ImportFile(const std::string& inputPath)
@@ -119,19 +218,21 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
         return;
 
     //get properties
+    //get name
     std::string fileName = inputPath.substr(inputPath.find_last_of("/\\") + 1);
     std::string extension = fileName.substr(fileName.find_last_of(".") + 1);
     fileName = fileName.substr(0, fileName.find_last_of("."));
-    MainEntry *entry = new MainEntry();
-
-    //get name
+    Entry *entry = new Entry();
+    //create short name
     entry->SetExtension(extension);
-    unsigned int number = 0;
-    do
+    unsigned int number = 1;
+    entry->SetName(fileName, number);
+    unsigned int lastCluster = STARTING_CLUSTER, lastOffset = 0;
+    while(CheckDuplicateName(entry, lastCluster, lastOffset))
     {
         number++;
-        entry->CreateShortName(fileName, number);
-    } while (CheckDuplicateShortName(std::string(entry->name, entry->name + 8)));
+        entry->SetName(fileName, number, true);
+    }
     //get attributes
     entry->attributes = (unsigned char)(GetFileAttributesA(inputPath.c_str()) & 63);  //prevent overflow
     //get date and time attributes
@@ -139,66 +240,93 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
     //get file size
     entry->fileSize = fileAttributes.nFileSizeLow;
 
-    //create short entry
-    //...
-    //create short entry
-
     //find free cluster and write to FAT
-    //...
-    //find free cluster and write to FAT
+    //calculate how many clusters needed
+    unsigned int clustersNeeded = (unsigned int)(std::ceil((double)entry->fileSize / (bytesPerSector * sectorsPerCluster)));
+    std::vector<unsigned int> freeClusters = GetFreeClusters(clustersNeeded);
+    if (freeClusters.empty())
+    {
+        std::cout << "Out of clusters for file!\n";
+        delete entry;
+        return;
+    }
+    entry->startingCluster = freeClusters[0];
+    WriteClustersToFAT(freeClusters);
 
     //write entries
-    //...
-    //write entries
+    if (!WriteFileEntry(entry))
+    {
+        std::cout << "Out of space for file entry!\n";
+        delete entry;
+        return;
+    }
 
     //write file's content
-    //...
-    //write file's content
+    WriteFileContent(fin, freeClusters);
     
     delete entry;
 }
 
 void MyFileSystem::test()
 {
-    std::cout << sizeof(MainEntry) << '\n';
-    ImportFile("D:\\wacom settings 2.png");
+    ImportFile("D:\\osu_settings.json");
 }
 
-void MyFileSystem::MainEntry::SetExtension(const std::string& fileExtension)
+void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
 {
-    for (int i = 0; i < fileExtension.size(); i++)
+    for (int i = 0; i < FILE_EXTENSION_LENGTH; i++)
         extension[i] = toupper(fileExtension[i]);
-    extension[3] = 0;
+    extension[FILE_EXTENSION_LENGTH] = 0;
 }
 
-void MyFileSystem::MainEntry::CreateShortName(const std::string& fileName, unsigned int number)
+void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int number, bool adjust)
 {
-    name[8] = 0;
-    std::string numberStr = std::to_string(number);
-    int size = 8 - numberStr.size();
-    //fill number
-    for (int i = size; i < 8; i++)
-        name[i] = numberStr[i - size];
-    name[size - 1] = '~';
-    int j = 0;
-    //get non-space letters
-    for (int i = 0; fileName[i] != '\0' && j < size - 1; i++)
+    if (!adjust)
     {
-        if (fileName[i] != ' ')
+        name[40] = 0;
+        std::string numberStr = std::to_string(number);
+        int size = 40 - numberStr.size();
+        //fill number
+        for (int i = size; i < 40; i++)
+            name[i] = numberStr[i - size];
+        name[size - 1] = '~';
+
+        int i = 0;
+        for (; fileName[i] != '\0' && i < size - 1; i++)
         {
-            name[j] = std::toupper(fileName[i]);
-            j++;
+            name[i] = fileName[i];
+        }
+        //fill with spaces
+        while (i < size - 1)
+        {
+            name[i++] = ' ';
         }
     }
-    //fill with spaces
-    while (j < size - 1)
+    //only if new number has more digits than old number
+    else
     {
-        name[j] = ' ';
-        j++;
+        int i = 1;
+        for (int j = 38; j > -1; j--)
+        {
+            if (name[j] == '~')
+            {
+                i = j;
+                break;
+            } 
+        }
+        unsigned int oldNumber = std::atoi(std::string(name + i + 1, name + 40).c_str());
+        i -= std::to_string(number).size() - std::to_string(oldNumber).size();
+
+        name[i] = '~';
+        std::string newNumberStr = std::to_string(number);
+        for (int j = i + 1; j < 40; j++)
+        {
+            name[j] = newNumberStr[j - i - 1];
+        }
     }
 }
 
-void MyFileSystem::MainEntry::SetDateAndTime(const WIN32_FILE_ATTRIBUTE_DATA& fileAttributes)
+void MyFileSystem::Entry::SetDateAndTime(const WIN32_FILE_ATTRIBUTE_DATA& fileAttributes)
 {
     FileTimeToDosDateTime(&fileAttributes.ftCreationTime, &creationDate, &creationTime);
     WORD lastAccessTime;

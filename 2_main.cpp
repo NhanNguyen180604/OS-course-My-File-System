@@ -24,15 +24,15 @@ void WriteBootSector()
     data = SECTORS_BEFORE_FAT;
     file.write((char*)&data, 1);
 
-    data = NUMBER_OF_FAT;
-    file.write((char*)&data, 1);
-
     data = FAT_SIZE;
     file.write((char*)&data, 2);
 
     data = VOLUME_SIZE;
     file.write((char*)&data, 4);  
 
+    file.seekp(SECTORS_BEFORE_FAT * BYTES_PER_SECTOR + 2 * FAT_ENTRY_SIZE);
+    unsigned int my_eof = MY_EOF;
+    file.write((char*)&my_eof, FAT_ENTRY_SIZE);
     file.close();
 }
 
