@@ -68,8 +68,26 @@ bool MyFileSystem::CheckDuplicateName(Entry *&entry)
             //sign of erased file
             if (tempEntry[0] == -27)
                 continue;
+            //sign of empty entry
+            if (tempEntry[0] == 0)
+                return false;
             //if duplicated
-            if (std::string(tempEntry.begin(), tempEntry.begin() + 40) == entry->name && std::string(tempEntry.begin() + 41, tempEntry.begin() + 45) == entry->extension)
+            char tempEntryName[41] = {0};
+            char entryName[41] = {0};
+            for (int i = 0; i < 40; i++)
+            {
+                tempEntryName[i] = tempEntry[i];
+                entryName[i] = entry->name[i];
+            }
+            
+            char tempEntryExtension[4] = {0};
+            char entryExtension[4] = {0};
+            for (int i = 0; i < 3; i++)
+            {
+                tempEntryExtension[i] = tempEntry[i + 40];
+                entryExtension[i] = entry->extension[i];
+            }
+            if (!strcmp(tempEntryName, entryName) && !strcmp(tempEntryExtension, entryExtension))
                 return true;
         }
     }
@@ -208,6 +226,11 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
     WIN32_FILE_ATTRIBUTE_DATA fileAttributes{};
     GetFileAttributesEx(std::wstring(inputPath.begin(), inputPath.end()).c_str(), GetFileExInfoStandard, &fileAttributes);
 
+    //check file size limit
+    unsigned int limit = bytesPerSector * sectorsPerCluster * NUMBER_OF_CLUSTERS;
+    if (fileAttributes.nFileSizeHigh > 0 || fileAttributes.nFileSizeLow > limit)
+        return;
+        
     //get properties
     //get name
     std::string fileName = inputPath.substr(inputPath.find_last_of("/\\") + 1);
@@ -259,7 +282,7 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
 
 void MyFileSystem::test()
 {
-    ImportFile("D:\\osu_settings.json");
+    ImportFile("E:\\osu_settings.json");
 }
 
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
