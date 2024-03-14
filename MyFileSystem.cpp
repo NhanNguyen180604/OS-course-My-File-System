@@ -54,27 +54,22 @@ MyFileSystem::~MyFileSystem()
     f.close();
 }
 
-bool MyFileSystem::CheckDuplicateName(Entry *&entry, unsigned int &lastCluster, unsigned int &lastOffset)
+bool MyFileSystem::CheckDuplicateName(Entry *&entry)
 {
-    std::vector<unsigned int> rdetClusters = ReadFAT(lastCluster);
+    std::vector<unsigned int> rdetClusters = ReadFAT(STARTING_CLUSTER);
     for (unsigned int cluster : rdetClusters)
     {
-        lastCluster = cluster;
         unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (cluster - STARTING_CLUSTER);
-        unsigned int bytesOffset;
-        if (lastOffset == 0)
-            bytesOffset = sectorOffset * bytesPerSector;
-        else bytesOffset = lastOffset;
+        unsigned int bytesOffset = sectorOffset * bytesPerSector;
         unsigned int limitOffset = bytesOffset + bytesPerSector * sectorsPerCluster;  //start of next cluster
         for (; bytesOffset < limitOffset; bytesOffset += sizeof(Entry))
         {
-            lastOffset = bytesOffset;
             std::vector<char> tempEntry = ReadBlock(bytesOffset, sizeof(Entry));
             //sign of erased file
             if (tempEntry[0] == -27)
                 continue;
             //if duplicated
-            if (std::string(tempEntry.begin(), tempEntry.begin() + 40) == entry->name)
+            if (std::string(tempEntry.begin(), tempEntry.begin() + 40) == entry->name && std::string(tempEntry.begin() + 41, tempEntry.begin() + 45) == entry->extension)
                 return true;
         }
     }
@@ -194,6 +189,7 @@ void MyFileSystem::WriteFileContent(std::ifstream& fin, const std::vector<unsign
         f.seekp(bytesOffset, f.beg);
         f.write(&data[0], clusterSize);
     }
+    f.flush();
 }
 
 void MyFileSystem::ImportFile(const std::string& inputPath)
@@ -211,11 +207,6 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
     //https://www.geeksforgeeks.org/convert-stdstring-to-lpcwstr-in-c/
     WIN32_FILE_ATTRIBUTE_DATA fileAttributes{};
     GetFileAttributesEx(std::wstring(inputPath.begin(), inputPath.end()).c_str(), GetFileExInfoStandard, &fileAttributes);
-    
-    //check file size limit
-    unsigned int limit = bytesPerSector * sectorsPerCluster * NUMBER_OF_CLUSTERS;
-    if (fileAttributes.nFileSizeHigh > 0 || fileAttributes.nFileSizeLow > limit)
-        return;
 
     //get properties
     //get name
@@ -227,8 +218,7 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
     entry->SetExtension(extension);
     unsigned int number = 1;
     entry->SetName(fileName, number);
-    unsigned int lastCluster = STARTING_CLUSTER, lastOffset = 0;
-    while(CheckDuplicateName(entry, lastCluster, lastOffset))
+    while(CheckDuplicateName(entry))
     {
         number++;
         entry->SetName(fileName, number, true);
@@ -275,15 +265,13 @@ void MyFileSystem::test()
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
 {
     for (int i = 0; i < FILE_EXTENSION_LENGTH; i++)
-        extension[i] = toupper(fileExtension[i]);
-    extension[FILE_EXTENSION_LENGTH] = 0;
+        extension[i] = fileExtension[i];
 }
 
 void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int number, bool adjust)
 {
     if (!adjust)
     {
-        name[40] = 0;
         std::string numberStr = std::to_string(number);
         int size = 40 - numberStr.size();
         //fill number
