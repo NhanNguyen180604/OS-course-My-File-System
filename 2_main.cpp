@@ -30,8 +30,17 @@ void WriteBootSector()
     data = VOLUME_SIZE;
     file.write((char*)&data, 4);  
 
-    file.seekp(SECTORS_BEFORE_FAT * BYTES_PER_SECTOR + 2 * FAT_ENTRY_SIZE);
+    file.close();
+}
+
+void Write3FATEntries()
+{
+    std::fstream file(FS_PATH, std::ios::binary | std::ios::in | std::ios::out);
+    //write the first 3 entries in FAT
+    file.seekp(SECTORS_BEFORE_FAT * BYTES_PER_SECTOR);
     unsigned int my_eof = MY_EOF;
+    file.write((char*)&my_eof, FAT_ENTRY_SIZE);
+    file.write((char*)&my_eof, FAT_ENTRY_SIZE);
     file.write((char*)&my_eof, FAT_ENTRY_SIZE);
     file.close();
 }
@@ -52,9 +61,13 @@ int main()
         std::cout << "Creating File System file" << '\n';
         CreateFS();
         WriteBootSector();
+        Write3FATEntries();
     }
 
     MyFileSystem myFS;
+    if (!myFS.CheckFSPassword())
+        return 1;
+        
     myFS.test();
     return 0;
 }

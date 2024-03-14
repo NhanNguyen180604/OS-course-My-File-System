@@ -15,6 +15,7 @@
 #define FREE 0 //free cluster value in FAT
 #define MY_EOF 268435455  //EOF cluster value in FAT
 #define VOLUME_SIZE 2097152 //4 bytes, size in sector
+#define MAX_PASSWORD_LENGTH 496
 #define STARTING_CLUSTER 2
 #define NUMBER_OF_CLUSTERS 523265 //size in sector, do math to get this number
 #define FINAL_CLUSTER 523266  //cluster starts at 2
@@ -53,6 +54,12 @@ private:
     unsigned int fatSize;
     unsigned int fatEntrySize = FAT_ENTRY_SIZE;
     unsigned int volumeSize;
+    bool hasPassword;
+
+    void Encrypt(std::string& data, unsigned char key);
+    void Decrypt(std::string& data, unsigned char key);
+    void CreateFSPassword();
+    bool CheckFSPassword(const std::string& password);
 
     void WriteBlock(unsigned int offset, std::string data, bool writeCluster, bool padding);
     void WriteBlock(unsigned int offset, unsigned int data, bool writeCluster, bool padding);
@@ -73,6 +80,7 @@ public:
     MyFileSystem();
     ~MyFileSystem();
     
+    bool CheckFSPassword();
     void ListFiles();
     void ImportFile(const std::string& inputPath);
     void ExportFile(const std::string& outputPath);
