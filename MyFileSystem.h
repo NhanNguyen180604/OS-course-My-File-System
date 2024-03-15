@@ -76,6 +76,8 @@ private:
     //write file's content to cluster
     void WriteFileContent(std::ifstream& fin, const std::vector<unsigned int>& clusters);
 
+    //get list of file
+    std::vector<Entry> GetFileList();
 public:
     MyFileSystem();
     ~MyFileSystem();

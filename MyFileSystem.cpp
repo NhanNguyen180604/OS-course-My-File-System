@@ -63,9 +63,9 @@ void MyFileSystem::CreateFSPassword()
     
     //input password
     std::string password;
-    std::cout << "Enter password (max length is " << MAX_PASSWORD_LENGTH << "): ";
-    std::getline(std::cin, password);
     std::cin.clear();
+    std::cout << "Enter password (max length is " << MAX_PASSWORD_LENGTH << "): ";
+    std::cin >> password;
 
     if (password.size() > MAX_PASSWORD_LENGTH)
         password = password.substr(0, MAX_PASSWORD_LENGTH);
@@ -121,9 +121,9 @@ bool MyFileSystem::CheckFSPassword()
         std::string password;
         do
         {
-            std::cout << "Enter password to access file system: ";
-            std::getline(std::cin, password);
             std::cin.clear();
+            std::cout << "Enter password to access file system: ";
+            std::cin >> password;
             if (!CheckFSPassword(password))
             {
                 std::cout << "Wrong password!\n";
@@ -384,7 +384,7 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
 
 void MyFileSystem::test()
 {
-    
+    CreateFSPassword();
 }
 
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
