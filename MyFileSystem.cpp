@@ -73,6 +73,11 @@ std::string MyFileSystem::GenerateHash(const std::string& data)
 //example
 void MyFileSystem::EncryptData(std::string& data, const std::string& key, Entry *&entry)
 {
+    if (data.size() == 0)
+    {
+        std::cout << "Program does not encrypt empty file!\n";
+        return;
+    }
     using namespace CryptoPP;
 
     //24 bytes
@@ -94,6 +99,9 @@ void MyFileSystem::EncryptData(std::string& data, const std::string& key, Entry 
 
 void MyFileSystem::DecryptData(std::string& data, const std::string& key, Entry *&entry)
 {
+    if (data.size() == 0)
+        return;
+        
     using namespace CryptoPP;
 
     //24 bytes
@@ -414,6 +422,8 @@ void MyFileSystem::ImportFile(const std::string& inputPath, bool hasPassword)
     //find free cluster and write to FAT
     //calculate how many clusters needed
     unsigned int clustersNeeded = (unsigned int)(std::ceil((double)entry->fileSize / (bytesPerSector * sectorsPerCluster)));
+    if (clustersNeeded == 0)
+        clustersNeeded++;
     std::vector<unsigned int> freeClusters = GetFreeClusters(clustersNeeded);
     if (freeClusters.empty())
     {
@@ -569,14 +579,14 @@ void MyFileSystem::ExportFile()
 void MyFileSystem::test()
 {
     //CreateFSPassword();
-    // ImportFile();
+    ImportFile();
     // Entry *e = new Entry();
     // f.seekg(2094080, f.beg);
     // f.read((char*)e, sizeof(Entry));
     // ChangeFilePassword(e, 2094080);
     // delete e;
 
-    ExportFile();
+    // ExportFile();
 }
 
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
