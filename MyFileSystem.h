@@ -3,7 +3,6 @@
 #include <string>
 #include <vector>
 #include <iostream>
-#include <windows.h>
 #include <map>
 
 #include "cryptlib.h"
@@ -26,8 +25,10 @@
 #define STARTING_CLUSTER 2
 #define NUMBER_OF_CLUSTERS 523265 //size in sector, do math to get this number
 #define FINAL_CLUSTER 523266  //cluster starts at 2
-#define ENTRY_NAME_SIZE 40
-#define FILE_EXTENSION_LENGTH 3
+#define ENTRY_NAME_SIZE 48
+#define FILE_EXTENSION_LENGTH 4
+
+typedef unsigned char byte;
 
 class MyFileSystem
 {
@@ -38,25 +39,19 @@ private:
         //name may be shrunk to avoid duplicate
         char name[ENTRY_NAME_SIZE];
         char extension[FILE_EXTENSION_LENGTH];
-        unsigned char attributes;
-        WORD creationTime;
-        WORD creationDate;
-        WORD lastAccessDate;
-        WORD lastWriteTime;
-        WORD lastWriteDate;
+        //reserved for storing first character of file name when deleted
+        char reserved[4] = {0};
+        int nameLen;
         unsigned int startingCluster;
         unsigned int fileSize;
-        //reserved for storing first character of file name when deleted
-        char reserved[2] = {0};
         bool hasPassword = 0;
-        char padding[15] = {0};
+        char padding[11] = {0};
         char hashedPassword[32] = {0};
         byte mac[16] = {0};
 
         void SetName(const std::string& fileName, unsigned int number, bool adjusted = false);
         std::string GetFullName();
         void SetExtension(const std::string& fileExtension);
-        void SetDateAndTime(const WIN32_FILE_ATTRIBUTE_DATA &fileAttributes);
         void SetHash(const std::string& hash);
     };
 #pragma pack(pop)

@@ -101,7 +101,7 @@ void MyFileSystem::DecryptData(std::string& data, const std::string& key, Entry 
 {
     if (data.size() == 0)
         return;
-        
+
     using namespace CryptoPP;
 
     //24 bytes
@@ -381,23 +381,20 @@ void MyFileSystem::ImportFile(const std::string& inputPath, bool hasPassword)
         return;
     }
 
-    //get file attributes
-    //https://stackoverflow.com/questions/26831838/how-to-get-file-information
-    //https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesexa?redirectedfrom=MSDN
-    //https://www.geeksforgeeks.org/convert-stdstring-to-lpcwstr-in-c/
-    WIN32_FILE_ATTRIBUTE_DATA fileAttributes{};
-    GetFileAttributesEx(std::wstring(inputPath.begin(), inputPath.end()).c_str(), GetFileExInfoStandard, &fileAttributes);
+    fin.seekg(0, f.end);
+    unsigned int fileSize = fin.tellg();
+    fin.clear();
+    fin.seekg(0, f.beg);
 
     //check file size limit
-    unsigned int limit = bytesPerSector * sectorsPerCluster * NUMBER_OF_CLUSTERS;
-    if (fileAttributes.nFileSizeHigh > 0 || fileAttributes.nFileSizeLow > limit)
+    unsigned int limit = bytesPerSector * sectorsPerCluster * (NUMBER_OF_CLUSTERS - 1);
+    if (fileSize > limit)
     {
         std::cout << "File's size is too large!\n";
         fin.close();
         return;
     }
 
-    //get properties
     //get name
     std::string fileName = inputPath.substr(inputPath.find_last_of("/\\") + 1);
     std::string extension = fileName.substr(fileName.find_last_of(".") + 1);
@@ -412,12 +409,8 @@ void MyFileSystem::ImportFile(const std::string& inputPath, bool hasPassword)
         number++;
         entry->SetName(fileName, number, true);
     }
-    //get attributes
-    entry->attributes = (unsigned char)(GetFileAttributesA(inputPath.c_str()) & 63);  //prevent overflow
-    //get date and time attributes
-    entry->SetDateAndTime(fileAttributes);
     //get file size
-    entry->fileSize = fileAttributes.nFileSizeLow;
+    entry->fileSize = fileSize;
 
     //find free cluster and write to FAT
     //calculate how many clusters needed
@@ -578,6 +571,7 @@ void MyFileSystem::ExportFile()
 
 void MyFileSystem::test()
 {
+    std::cout << sizeof(Entry);
     //CreateFSPassword();
     ImportFile();
     // Entry *e = new Entry();
@@ -611,6 +605,7 @@ void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int numb
         {
             name[i] = fileName[i];
         }
+        nameLen = i;
         //fill with spaces
         while (i < size - 1)
         {
@@ -630,6 +625,7 @@ void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int numb
             } 
         }
         unsigned int oldNumber = std::atoi(std::string(name + i + 1, name + ENTRY_NAME_SIZE).c_str());
+        nameLen = std::min(i, nameLen);
         i -= std::to_string(number).size() - std::to_string(oldNumber).size();
 
         name[i] = '~';
@@ -643,20 +639,9 @@ void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int numb
 
 std::string MyFileSystem::Entry::GetFullName()
 {
-    int i = ENTRY_NAME_SIZE;
-    while (name[i] != '~')
-        i--;
-    std::string result(name, name + i);
+    std::string result(name, name + nameLen);
     result += '.' + std::string(extension, extension + FILE_EXTENSION_LENGTH);
     return result;
-}
-
-void MyFileSystem::Entry::SetDateAndTime(const WIN32_FILE_ATTRIBUTE_DATA& fileAttributes)
-{
-    FileTimeToDosDateTime(&fileAttributes.ftCreationTime, &creationDate, &creationTime);
-    WORD lastAccessTime;
-    FileTimeToDosDateTime(&fileAttributes.ftLastAccessTime, &lastAccessDate, &lastAccessTime);
-    FileTimeToDosDateTime(&fileAttributes.ftLastWriteTime, &lastWriteDate, &lastWriteTime);
 }
 
 void MyFileSystem::Entry::SetHash(const std::string& hash)
