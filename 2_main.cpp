@@ -1,3 +1,6 @@
+//How to link cryptopp to project in Visual Studio Community 2022
+//https://www.youtube.com/watch?v=5XE4zEN-WKg
+
 #include <fstream>
 #include <iostream>
 #include "MyFileSystem.h"

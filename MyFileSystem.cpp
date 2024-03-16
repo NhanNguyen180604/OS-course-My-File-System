@@ -38,20 +38,89 @@ void MyFileSystem::WriteBlock(unsigned int offset, unsigned int data, bool write
     f.flush();
 }
 
-void MyFileSystem::Encrypt(std::string& data, unsigned char key)
+//hashing using PKCS5_PBKDF2_HMAC with SHA256
+//https://www.cryptopp.com/wiki/PKCS5_PBKDF2_HMAC
+//sample program 1
+std::string MyFileSystem::GenerateHash(const std::string& data)
 {
-    for (int i = 0; i < data.size(); i++)
+    using namespace CryptoPP;
+
+    byte *secret = new byte[data.size()];
+    size_t secretLen = data.size();
+    for (int i = 0; i < secretLen; i++)
     {
-        data[i] += key;
+        secret[i] = data[i];
     }
+    
+    byte salt[] = "Sodium Cloride";
+    size_t saltLen = strlen((const char*)salt);
+
+    byte derived[SHA256::DIGESTSIZE];
+
+    PKCS5_PBKDF2_HMAC<SHA256> pbkdf;
+	byte unused = 0;
+
+    pbkdf.DeriveKey(derived, sizeof(derived), unused, secret, secretLen, salt, saltLen, 10000, 0.0f);
+
+    std::string result(derived, derived + sizeof(derived));
+
+    delete[] secret;
+    return result;
 }
 
-void MyFileSystem::Decrypt(std::string& data, unsigned char key)
+//encrypting using XChaCha20Poly1305
+//https://www.cryptopp.com/wiki/XChaCha20Poly1305
+//example
+void MyFileSystem::EncryptData(std::string& data, const std::string& key, Entry *&entry)
 {
-    for (int i = 0; i < data.size(); i++)
+    using namespace CryptoPP;
+
+    const byte aad[] = 
     {
-        data[i] -= key;
-    }
+        0x50,0x51,0x52,0x53,0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7
+    };
+
+    //24 bytes
+    const byte iv[] = 
+    {
+        0x40,0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x4b,0x4c,0x4d,0x4e,0x4f,
+        0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x58
+    };
+    
+    byte *encrypted = new byte[data.size()];
+
+    XChaCha20Poly1305::Encryption enc;
+    enc.SetKeyWithIV((byte*)key.c_str(), key.size(), iv, sizeof(iv));
+    enc.EncryptAndAuthenticate(encrypted, entry->mac, sizeof(entry->mac), iv, sizeof(iv), aad, sizeof(aad), (byte*)data.c_str(), data.size());
+
+    data = std::string(encrypted, encrypted + data.size());
+    delete[] encrypted;
+}
+
+void MyFileSystem::DecryptData(std::string& data, const std::string& key, Entry *&entry)
+{
+    using namespace CryptoPP;
+
+    const byte aad[] = 
+    {
+        0x50,0x51,0x52,0x53,0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7
+    };
+
+    //24 bytes
+    const byte iv[] = 
+    {
+        0x40,0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x4b,0x4c,0x4d,0x4e,0x4f,
+        0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x58
+    };
+    
+    byte *decrypted = new byte[data.size()];
+
+    XChaCha20Poly1305::Decryption dec;
+    dec.SetKeyWithIV((byte*)key.c_str(), key.size(), iv, sizeof(iv));
+    dec.DecryptAndVerify(decrypted, entry->mac, sizeof(entry->mac), iv, sizeof(iv), aad, sizeof(aad), (byte*)data.c_str(), data.size());
+
+    data = std::string(decrypted, decrypted + data.size());
+    delete[] decrypted;
 }
 
 void MyFileSystem::CreateFSPassword()
@@ -64,53 +133,25 @@ void MyFileSystem::CreateFSPassword()
     //input password
     std::string password;
     std::cin.clear();
-    std::cout << "Enter password (max length is " << MAX_PASSWORD_LENGTH << "): ";
+    std::cout << "Enter password: ";
     std::cin >> password;
-
-    if (password.size() > MAX_PASSWORD_LENGTH)
-        password = password.substr(0, MAX_PASSWORD_LENGTH);
     std::cout << "Your password for the file system will be: " << password << '\n';
+    std::string hashedPassword = GenerateHash(password);
 
-    //simple encryption
-    srand(time(0));
-    unsigned char key = 0;
-    while (key == 0)
-        key = rand() % 256;
-    Encrypt(password, key);
+    //write hashed password to volume
+    f.seekp(32, f.beg);
+    f.write(hashedPassword.c_str(), hashedPassword.size());
 
-    //write password length and key to boot sector
-    unsigned short passwordLength = password.size();
-    f.write((char*)&passwordLength, 2); //offset 11d
-    f.write((char*)&key, 1); //offset 13d
-
-    //write encrypted password to boot sector
-    f.seekp(16, f.beg);
-    f.write(password.c_str(), password.size());
     f.flush();
 }
 
 bool MyFileSystem::CheckFSPassword(const std::string& password)
 {
-    //read password length
-    f.seekg(11, f.beg);
-    unsigned short passwordLength;
-    f.read((char*)&passwordLength, 2);
-    //read key
-    unsigned short key;
-    f.read((char*)&key, 2);
-    //read password
-    std::vector<char> encryptedPasswordVector = ReadBlock(16, passwordLength);
-    std::string actualPassword;
-    actualPassword.reserve(passwordLength);
-    for (int i = 0; i < passwordLength; i++)
-    {
-        actualPassword += encryptedPasswordVector[i];
-    }
-    Decrypt(actualPassword, key);
-    
-    if (password == actualPassword)
-        return true;
-    return false;
+    f.seekg(32, f.beg);
+    std::string encrypedPassword(32, 0);
+    f.read(&encrypedPassword[0], 32);
+
+    return encrypedPassword == GenerateHash(password);
 }
 
 bool MyFileSystem::CheckFSPassword()
@@ -149,8 +190,6 @@ MyFileSystem::MyFileSystem()
     f.read((char*)&fatSize, 2);
     f.read((char*)&volumeSize, 4);
     f.read((char*)&hasPassword, 1);
-
-    
 }
 
 MyFileSystem::~MyFileSystem()
@@ -160,7 +199,7 @@ MyFileSystem::~MyFileSystem()
 
 bool MyFileSystem::CheckDuplicateName(Entry *&entry)
 {
-    std::vector<unsigned int> rdetClusters = ReadFAT(STARTING_CLUSTER);
+    std::vector<unsigned int> rdetClusters = GetClustersChain(STARTING_CLUSTER);
     for (unsigned int cluster : rdetClusters)
     {
         unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (cluster - STARTING_CLUSTER);
@@ -176,29 +215,18 @@ bool MyFileSystem::CheckDuplicateName(Entry *&entry)
             if (tempEntry[0] == 0)
                 return false;
             //if duplicated
-            char tempEntryName[41] = {0};
-            char entryName[41] = {0};
-            for (int i = 0; i < 40; i++)
-            {
-                tempEntryName[i] = tempEntry[i];
-                entryName[i] = entry->name[i];
-            }
-            
-            char tempEntryExtension[4] = {0};
-            char entryExtension[4] = {0};
-            for (int i = 0; i < 3; i++)
-            {
-                tempEntryExtension[i] = tempEntry[i + 40];
-                entryExtension[i] = entry->extension[i];
-            }
-            if (!strcmp(tempEntryName, entryName) && !strcmp(tempEntryExtension, entryExtension))
+            std::string tempEntryName(tempEntry.begin(), tempEntry.begin() + ENTRY_NAME_SIZE);
+            std::string entryName(entry->name, entry->name + ENTRY_NAME_SIZE);
+            std::string tempEntryExtension(tempEntry.begin() + ENTRY_NAME_SIZE, tempEntry.begin() + ENTRY_NAME_SIZE + FILE_EXTENSION_LENGTH);
+            std::string entryExtension(entry->extension, entry->extension + FILE_EXTENSION_LENGTH);
+            if (tempEntryName == entryName && tempEntryExtension == entryExtension)
                 return true;
         }
     }
     return false;
 }
 
-std::vector<unsigned int> MyFileSystem::ReadFAT(unsigned int startingCluster)
+std::vector<unsigned int> MyFileSystem::GetClustersChain(unsigned int startingCluster)
 {
     std::vector<unsigned int> result;
     result.push_back(startingCluster);
@@ -257,7 +285,7 @@ void MyFileSystem::WriteClustersToFAT(const std::vector<unsigned int>& clusters)
 
 bool MyFileSystem::WriteFileEntry(Entry *&entry)
 {
-    std::vector<unsigned int> rdetClusters = ReadFAT(STARTING_CLUSTER);
+    std::vector<unsigned int> rdetClusters = GetClustersChain(STARTING_CLUSTER);
     unsigned int lastCluster = rdetClusters[rdetClusters.size() - 1];
     unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (lastCluster - STARTING_CLUSTER);
     unsigned int bytesOffset = sectorOffset * bytesPerSector;
@@ -297,22 +325,40 @@ bool MyFileSystem::WriteFileEntry(Entry *&entry)
     return true;
 }
 
-void MyFileSystem::WriteFileContent(std::ifstream& fin, const std::vector<unsigned int>& clusters)
+void MyFileSystem::WriteFileContent(const std::string& data, const std::vector<unsigned int>& clusters)
 {
+    int i = 0;
+    const unsigned int clusterSize = bytesPerSector * sectorsPerCluster;
     for (unsigned int cluster : clusters)
     {
-        const unsigned int clusterSize = bytesPerSector * sectorsPerCluster;
-        std::vector<char> data(clusterSize, 0);
-        fin.read(&data[0], clusterSize);
         unsigned int sectorOffset = sectorsBeforeFat + fatSize + (cluster - STARTING_CLUSTER) * sectorsPerCluster;
         unsigned int bytesOffset = sectorOffset * bytesPerSector;
         f.seekp(bytesOffset, f.beg);
-        f.write(&data[0], clusterSize);
+        size_t size = ((size_t)clusterSize < data.size() - i) ? clusterSize : data.size() - i;
+        f.write(&data[i], size);
+        i += clusterSize;
     }
     f.flush();
 }
 
-void MyFileSystem::ImportFile(const std::string& inputPath)
+std::string MyFileSystem::ReadFileContent(unsigned int fileSize, const std::vector<unsigned int>& clusters)
+{
+    std::string data(fileSize, 0);
+    int i = 0;
+    const unsigned int clusterSize = bytesPerSector * sectorsPerCluster;
+    for (unsigned int cluster : clusters)
+    {
+        unsigned int sectorOffset = sectorsBeforeFat + fatSize + (cluster - STARTING_CLUSTER) * sectorsPerCluster;
+        unsigned int bytesOffset = sectorOffset * bytesPerSector;
+        f.seekg(bytesOffset, f.beg);
+        size_t size = ((size_t)clusterSize < data.size() - i) ? clusterSize : data.size() - i;
+        f.read(&data[i], size);
+        i += clusterSize;
+    }
+    return data;
+}
+
+void MyFileSystem::ImportFile(const std::string& inputPath, bool hasPassword)
 {
     std::ifstream fin(inputPath, std::ios::binary | std::ios::in);
     if (!fin)
@@ -331,7 +377,11 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
     //check file size limit
     unsigned int limit = bytesPerSector * sectorsPerCluster * NUMBER_OF_CLUSTERS;
     if (fileAttributes.nFileSizeHigh > 0 || fileAttributes.nFileSizeLow > limit)
+    {
+        std::cout << "File's size is too large!\n";
+        fin.close();
         return;
+    }
 
     //get properties
     //get name
@@ -363,28 +413,114 @@ void MyFileSystem::ImportFile(const std::string& inputPath)
     {
         std::cout << "Out of clusters for file!\n";
         delete entry;
+        fin.close();
         return;
     }
     entry->startingCluster = freeClusters[0];
     WriteClustersToFAT(freeClusters);
+
+    //read the whole file into memory
+    std::string fileData(entry->fileSize, 0);
+    fin.read(&fileData[0], entry->fileSize);
+
+    //Create file password and encrypt file's content
+    std::ofstream fout;
+    if (hasPassword)
+    {
+        //set password's hash
+        std::string password;
+        std::cin.clear();
+        std::cout << "Enter file's password: ";
+        std::cin >> password;
+
+        std::string hashedPassword = GenerateHash(password);
+        std::string doublyHashedPassword = GenerateHash(hashedPassword);
+        entry->SetHash(doublyHashedPassword);
+
+        EncryptData(fileData, hashedPassword, entry);
+    }
 
     //write entries
     if (!WriteFileEntry(entry))
     {
         std::cout << "Out of space for file entry!\n";
         delete entry;
+        fin.close();
         return;
     }
 
     //write file's content
-    WriteFileContent(fin, freeClusters);
+    WriteFileContent(fileData, freeClusters);
     
     delete entry;
+    fin.close();
+}
+
+void MyFileSystem::ImportFile()
+{
+    std::string path;
+    std::cin.clear();
+    std::cout << "Enter file path: ";
+    std::cin >> path;
+
+    bool hasPassword;
+    std::cout << "Do you want to set password? (1 - yes/0 - no): ";
+    std::cin >> hasPassword;
+
+    ImportFile(path, hasPassword);
+}
+
+void MyFileSystem::ExportFile(const std::string& outputPath, Entry *&entry)
+{
+    std::string hashedPassword(entry->hashedPassword, entry->hashedPassword + 32);
+    std::vector<unsigned int> fileClusters = GetClustersChain(entry->startingCluster);
+    std::string fileData = ReadFileContent(entry->fileSize, fileClusters);
+
+    if (hashedPassword != std::string(32, 0))
+    {
+        std::string filePassword;
+        std::cin.clear();
+        std::cout << "Enter file's password: ";
+        std::cin >> filePassword;
+
+        std::string key = GenerateHash(filePassword);
+        if (GenerateHash(key) != hashedPassword)
+        {
+            std::cout << "Wrong password!\n";
+            return;
+        }
+
+        DecryptData(fileData, key, entry);
+    }
+
+    std::string fileName = entry->GetName();
+    std::ofstream fout(outputPath + fileName, std::ios::binary | std::ios::out);
+    fout.write(&fileData[0], fileData.size());
+    fout.close();
+}
+
+void MyFileSystem::ExportFile()
+{
+    std::string path;
+    std::cin.clear();
+    std::cout << "Enter output path: ";
+    std::cin >> path;
+
+    //list file, get file entry
+    //...
+    //list file, get file entry
+    // Entry *e = new Entry();
+
+    // ExportFile(path, e);
+    // delete e;
 }
 
 void MyFileSystem::test()
 {
-    CreateFSPassword();
+    //CreateFSPassword();
+    //ImportFile("D:\\osu_settings.json", false);
+    //ImportFile("D:\\osu_settings.json", true);
+    ExportFile();
 }
 
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
@@ -398,9 +534,9 @@ void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int numb
     if (!adjust)
     {
         std::string numberStr = std::to_string(number);
-        int size = 40 - numberStr.size();
+        int size = ENTRY_NAME_SIZE - numberStr.size();
         //fill number
-        for (int i = size; i < 40; i++)
+        for (int i = size; i < ENTRY_NAME_SIZE; i++)
             name[i] = numberStr[i - size];
         name[size - 1] = '~';
 
@@ -419,7 +555,7 @@ void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int numb
     else
     {
         int i = 1;
-        for (int j = 38; j > -1; j--)
+        for (int j = ENTRY_NAME_SIZE - 2; j > -1; j--)
         {
             if (name[j] == '~')
             {
@@ -427,16 +563,24 @@ void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int numb
                 break;
             } 
         }
-        unsigned int oldNumber = std::atoi(std::string(name + i + 1, name + 40).c_str());
+        unsigned int oldNumber = std::atoi(std::string(name + i + 1, name + ENTRY_NAME_SIZE).c_str());
         i -= std::to_string(number).size() - std::to_string(oldNumber).size();
 
         name[i] = '~';
         std::string newNumberStr = std::to_string(number);
-        for (int j = i + 1; j < 40; j++)
+        for (int j = i + 1; j < ENTRY_NAME_SIZE; j++)
         {
             name[j] = newNumberStr[j - i - 1];
         }
     }
+}
+
+std::string MyFileSystem::Entry::GetName()
+{
+    int i = ENTRY_NAME_SIZE;
+    while (name[i] != '~')
+        i--;
+    return std::string(name, name + i);
 }
 
 void MyFileSystem::Entry::SetDateAndTime(const WIN32_FILE_ATTRIBUTE_DATA& fileAttributes)
@@ -445,4 +589,12 @@ void MyFileSystem::Entry::SetDateAndTime(const WIN32_FILE_ATTRIBUTE_DATA& fileAt
     WORD lastAccessTime;
     FileTimeToDosDateTime(&fileAttributes.ftLastAccessTime, &lastAccessDate, &lastAccessTime);
     FileTimeToDosDateTime(&fileAttributes.ftLastWriteTime, &lastWriteDate, &lastWriteTime);
+}
+
+void MyFileSystem::Entry::SetHash(const std::string& hash)
+{
+    for (int i = 0; i < 32; i++)
+    {
+        hashedPassword[i] = hash[i];
+    }
 }

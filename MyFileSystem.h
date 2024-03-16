@@ -4,7 +4,15 @@
 #include <vector>
 #include <iostream>
 #include <windows.h>
-#include <cmath>
+#include <streambuf>
+
+#include "cryptlib.h"
+#include "pwdbased.h"
+#include "sha.h"
+#include "hex.h"
+#include "chachapoly.h"
+#include "filters.h"
+#include "files.h"
 
 #define FS_PATH "E:\\MyFS.Dat"
 #define BYTES_PER_SECTOR 512  //2 bytes
@@ -15,10 +23,10 @@
 #define FREE 0 //free cluster value in FAT
 #define MY_EOF 268435455  //EOF cluster value in FAT
 #define VOLUME_SIZE 2097152 //4 bytes, size in sector
-#define MAX_PASSWORD_LENGTH 496
 #define STARTING_CLUSTER 2
 #define NUMBER_OF_CLUSTERS 523265 //size in sector, do math to get this number
 #define FINAL_CLUSTER 523266  //cluster starts at 2
+#define ENTRY_NAME_SIZE 40
 #define FILE_EXTENSION_LENGTH 3
 
 class MyFileSystem
@@ -40,10 +48,15 @@ private:
         unsigned int fileSize;
         //reserved for storing first character of file name when deleted
         char reserved[2] = {0};
+        char padding[16] = {0};
+        char hashedPassword[32] = {0};
+        byte mac[16] = {0};
 
         void SetName(const std::string& fileName, unsigned int number, bool adjusted = false);
+        std::string GetName();
         void SetExtension(const std::string& fileExtension);
         void SetDateAndTime(const WIN32_FILE_ATTRIBUTE_DATA &fileAttributes);
+        void SetHash(const std::string& hash);
     };
 #pragma pack(pop)
 
@@ -56,8 +69,6 @@ private:
     unsigned int volumeSize;
     bool hasPassword;
 
-    void Encrypt(std::string& data, unsigned char key);
-    void Decrypt(std::string& data, unsigned char key);
     void CreateFSPassword();
     bool CheckFSPassword(const std::string& password);
 
@@ -66,7 +77,7 @@ private:
     std::vector<char> ReadBlock(unsigned int offset, unsigned int size);
     bool CheckDuplicateName(Entry *&entry);
     //read and return consecutive clusters of files
-    std::vector<unsigned int> ReadFAT(unsigned int startingCluster);
+    std::vector<unsigned int> GetClustersChain(unsigned int startingCluster);
     //find n free clusters
     std::vector<unsigned int> GetFreeClusters(unsigned int n);
     //write consecutive clusters to FAT
@@ -74,19 +85,33 @@ private:
     //write file's entry to RDET
     bool WriteFileEntry(Entry *&entry);
     //write file's content to cluster
-    void WriteFileContent(std::ifstream& fin, const std::vector<unsigned int>& clusters);
+    void WriteFileContent(const std::string& data, const std::vector<unsigned int>& clusters);
+    //read file's content from cluster
+    std::string ReadFileContent(unsigned int fileSize, const std::vector<unsigned int>& clusters);
+
+    //generate hash using PKCS5_PBKDF2_HMAC with SHA256
+    //https://www.cryptopp.com/wiki/PKCS5_PBKDF2_HMAC
+    std::string GenerateHash(const std::string& data);
+    //encrypt using 
+    void EncryptData(std::string& data, const std::string& key, Entry *&entry);
+    void DecryptData(std::string& data, const std::string& key, Entry *&entry);
 
     //get list of file
-    std::vector<Entry> GetFileList();
+    std::vector<Entry*> GetFileList();
+
+    void ImportFile(const std::string& inputPath, bool setPassword = false);
+    void ExportFile(const std::string& outputPath, Entry *&entry);
+
 public:
     MyFileSystem();
     ~MyFileSystem();
     
     bool CheckFSPassword();
+    void ImportFile();
+    void ExportFile();
     void ListFiles();
-    void ImportFile(const std::string& inputPath);
-    void ExportFile(const std::string& outputPath);
     void MyDeleteFile(bool restorable = true);
+
 
     void test();
 };
