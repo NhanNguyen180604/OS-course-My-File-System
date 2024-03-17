@@ -300,22 +300,24 @@ void MyFileSystem::WriteClustersToFAT(const std::vector<unsigned int>& clusters)
 bool MyFileSystem::WriteFileEntry(Entry *&entry)
 {
     std::vector<unsigned int> rdetClusters = GetClustersChain(STARTING_CLUSTER);
-    unsigned int lastCluster = rdetClusters[rdetClusters.size() - 1];
-    unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (lastCluster - STARTING_CLUSTER);
-    unsigned int bytesOffset = sectorOffset * bytesPerSector;
-    unsigned int limitOffset = bytesOffset + bytesPerSector * sectorsPerCluster;  //start of next cluster
-    for (; bytesOffset < limitOffset; bytesOffset += sizeof(Entry))
+    for (unsigned int cluster : rdetClusters)
     {
-        std::vector<char> tempEntry = ReadBlock(bytesOffset, sizeof(Entry));
-        if (tempEntry[0] == 0)
+        unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (cluster - STARTING_CLUSTER);
+        unsigned int bytesOffset = sectorOffset * bytesPerSector;
+        unsigned int limitOffset = bytesOffset + bytesPerSector * sectorsPerCluster;  //start of next cluster
+        for (; bytesOffset < limitOffset; bytesOffset += sizeof(Entry))
         {
-            f.seekp(bytesOffset, f.beg);
-            f.write((char*)entry, sizeof(Entry));
-            f.flush();
-            return true;
+            std::vector<char> tempEntry = ReadBlock(bytesOffset, sizeof(Entry));
+            if (tempEntry[0] == 0 || (tempEntry[0] == -27 && tempEntry[ENTRY_NAME_SIZE + FILE_EXTENSION_LENGTH] == 0))
+            {
+                f.seekp(bytesOffset, f.beg);
+                f.write((char*)entry, sizeof(Entry));
+                f.flush();
+                return true;
+            }
         }
     }
-
+    
     //if out of space, append another cluster for RDET
     std::vector<unsigned int> newFreeCluster = GetFreeClusters(1); 
     if (newFreeCluster.empty())
@@ -324,15 +326,15 @@ bool MyFileSystem::WriteFileEntry(Entry *&entry)
     //write to FAT new cluster of RDET
     unsigned int offset = sectorsBeforeFat * bytesPerSector + rdetClusters[rdetClusters.size() - 1] * fatEntrySize;
     f.seekp(offset, f.beg);
-    f.write((char*)&newFreeCluster[0], f.beg);
+    f.write((char*)&newFreeCluster[0], fatEntrySize);
     offset = sectorsBeforeFat * bytesPerSector + newFreeCluster[0] * fatEntrySize;
     f.seekp(offset, f.beg);
     unsigned int eof = MY_EOF;
-    f.write((char*)&eof, sizeof(fatEntrySize));
+    f.write((char*)&eof, fatEntrySize);
 
     //write entry to new cluster
-    sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (newFreeCluster[0] - STARTING_CLUSTER);
-    bytesOffset = sectorOffset * bytesPerSector;
+    unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (newFreeCluster[0] - STARTING_CLUSTER);
+    unsigned int bytesOffset = sectorOffset * bytesPerSector;
     f.seekp(bytesOffset, f.beg);
     f.write((char*)entry, sizeof(Entry));
     f.flush();
@@ -587,7 +589,7 @@ void MyFileSystem::ExportFile()
 
 void MyFileSystem::test()
 {
-    MyDeleteFile();
+    ListFiles();
 }
 
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
