@@ -640,12 +640,14 @@ void MyFileSystem::PrintFileList(const std::vector<std::pair<std::string, unsign
     }
 }
 
-void MyFileSystem::ListFiles() {
+void MyFileSystem::ListFiles() 
+{
     std::vector<std::pair<std::string, unsigned int>> fileList = MyFileSystem::GetFileList();
     PrintFileList(fileList);
 }
 
-void MyFileSystem::MyDeleteFile(unsigned int bytesOffset, bool restorable) {
+void MyFileSystem::MyDeleteFile(unsigned int bytesOffset, bool restorable) 
+{
     f.seekg(bytesOffset, f.beg);
     Entry e;
     f.read((char*)&e, sizeof(Entry));
@@ -712,7 +714,8 @@ void MyFileSystem::MyDeleteFile()
     MyDeleteFile(bytesOffset, restorable);
 }
 
-void MyFileSystem::RestoreFile(unsigned int bytesOffset) {
+void MyFileSystem::RestoreFile(unsigned int bytesOffset) 
+{
     f.seekg(bytesOffset, f.beg);
     Entry e;
     Entry *pE = nullptr;
@@ -737,7 +740,8 @@ void MyFileSystem::RestoreFile(unsigned int bytesOffset) {
     f.flush();
 }
 
-void MyFileSystem::MyRestoreFile() {
+void MyFileSystem::MyRestoreFile() 
+{
     std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList(true);
     if (fileList.size() == 0)
     {
@@ -904,5 +908,27 @@ void MyFileSystem::Entry::SetHash(const std::string& hash)
 
 std::string MyFileSystem::Entry::GetInfo() const
 {
-    return GetFullName() + "  (" + GetIndex() + ")  " + std::to_string(fileSize) + " bytes";
+    double size = fileSize;
+    int i = 0;
+    std::string result = GetFullName() + "  (" + GetIndex() + ")  ";
+    while (size >= 1000)
+    {
+        size /= 1000;
+        i++;
+    }
+
+    //https://stackoverflow.com/questions/16605967/set-precision-of-stdto-string-when-converting-floating-point-values
+    //answered by hmjd on May 17, 2013 at 09:50
+    int precision = 2;
+    std::ostringstream out;
+    out.precision(precision);
+    out << std::fixed << size;
+    result += out.str();
+
+    if (i == 0)
+        result += " B";
+    else if (i == 1)
+        result += " KB";
+    else result += " MB";
+    return result;
 }
