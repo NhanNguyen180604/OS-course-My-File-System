@@ -513,6 +513,11 @@ void MyFileSystem::ChangeFilePassword(Entry *&entry, unsigned int offset, bool r
 void MyFileSystem::ChangeFilePassword()
 {
     std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList();
+    if (fileList.empty())
+    {
+        std::cout << "There is no file!\n";
+        return;
+    }
     PrintFileList(fileList);
 
     //choose file
@@ -565,6 +570,11 @@ void MyFileSystem::ExportFile()
 {
     //list file
     std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList();
+    if (fileList.empty())
+    {
+        std::cout << "There is no file!\n";
+        return;
+    }
     PrintFileList(fileList);
     std::cout << '\n';
 
@@ -643,6 +653,11 @@ void MyFileSystem::PrintFileList(const std::vector<std::pair<std::string, unsign
 void MyFileSystem::ListFiles() 
 {
     std::vector<std::pair<std::string, unsigned int>> fileList = MyFileSystem::GetFileList();
+    if (fileList.empty())
+    {
+        std::cout << "There is no file\n";
+        return;
+    }
     PrintFileList(fileList);
 }
 
@@ -695,6 +710,11 @@ void MyFileSystem::MyDeleteFile()
 {
     //list file
     std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList();
+    if (fileList.empty())
+    {
+        std::cout << "There is no file!\n";
+        return;
+    }
     PrintFileList(fileList);
     std::cout << '\n';
 
@@ -786,7 +806,7 @@ void MyFileSystem::HandleInput()
         {
             case '1':
             {
-                if (hasPassword)
+                if (this->hasPassword)
                     ChangeFSPassword();
                 else CreateFSPassword();
                 break;
