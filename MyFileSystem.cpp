@@ -18,7 +18,7 @@ void MyFileSystem::WriteBlock(unsigned int offset, std::string data, bool writeC
         unsigned int paddingSize = writeCluster ? sectorsPerCluster * bytesPerSector : bytesPerSector;
         paddingSize -= data.size();
         std::string paddingStr(paddingSize, '\0');
-        f.write(paddingStr.c_str(), paddingSize);
+        f.write(&paddingStr[0], paddingSize);
     }
     f.flush();
 }
@@ -33,7 +33,7 @@ void MyFileSystem::WriteBlock(unsigned int offset, unsigned int data, bool write
         unsigned int paddingSize = writeCluster ? sectorsPerCluster * bytesPerSector : bytesPerSector;
         paddingSize -= sizeof(data);
         std::string paddingStr(paddingSize, '\0');
-        f.write(paddingStr.c_str(), paddingSize);
+        f.write(&paddingStr[0], paddingSize);
     }
     f.flush();
 }
@@ -244,16 +244,16 @@ std::vector<unsigned int> MyFileSystem::GetClustersChain(unsigned int startingCl
 {
     std::vector<unsigned int> result;
     result.push_back(startingCluster);
-    f.seekg(sectorsBeforeFat * bytesPerSector + startingCluster * FAT_ENTRY_SIZE, f.beg);
+    f.seekg(sectorsBeforeFat * bytesPerSector + startingCluster * fatEntrySize, f.beg);
     unsigned int nextCluster = 0;
-    f.read((char*)&nextCluster, FAT_ENTRY_SIZE);
+    f.read((char*)&nextCluster, fatEntrySize);
     if (nextCluster == 0)
         return {};
     while (nextCluster != MY_EOF)
     {
         result.push_back(nextCluster);
-        f.seekg(sectorsBeforeFat * bytesPerSector + nextCluster * FAT_ENTRY_SIZE, f.beg);
-        f.read((char*)&nextCluster, FAT_ENTRY_SIZE);
+        f.seekg(sectorsBeforeFat * bytesPerSector + nextCluster * fatEntrySize, f.beg);
+        f.read((char*)&nextCluster, fatEntrySize);
     }
     return result;
 }
@@ -263,11 +263,11 @@ std::vector<unsigned int> MyFileSystem::GetFreeClusters(unsigned int n)
     std::vector<unsigned int> result;
     //cluster for actual file's data starts from 3
     unsigned int cluster = STARTING_CLUSTER + 1;
-    f.seekp(sectorsBeforeFat * bytesPerSector + cluster * FAT_ENTRY_SIZE, f.beg);
+    f.seekp(sectorsBeforeFat * bytesPerSector + cluster * fatEntrySize, f.beg);
     while (n && cluster <= FINAL_CLUSTER)
     {
         unsigned int nextCluster = 0;
-        f.read((char*)&nextCluster, FAT_ENTRY_SIZE);
+        f.read((char*)&nextCluster, fatEntrySize);
         if (nextCluster == 0)
         {
             n--;
@@ -328,7 +328,7 @@ bool MyFileSystem::WriteFileEntry(Entry *&entry)
     offset = sectorsBeforeFat * bytesPerSector + newFreeCluster[0] * fatEntrySize;
     f.seekp(offset, f.beg);
     unsigned int eof = MY_EOF;
-    f.write((char*)&eof, sizeof(FAT_ENTRY_SIZE));
+    f.write((char*)&eof, sizeof(fatEntrySize));
 
     //write entry to new cluster
     sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (newFreeCluster[0] - STARTING_CLUSTER);
@@ -555,32 +555,39 @@ void MyFileSystem::ExportFile(const std::string& outputPath, Entry *&entry)
 
 void MyFileSystem::ExportFile()
 {
+    //list file
+    std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList();
+    PrintFileList(fileList);
+    std::cout << '\n';
+
+    //choose file
+    int choice;
+    do
+    {
+        std::cout << "Enter which file to export: ";
+        std::cin >> choice;
+    } while (choice <= 0 || choice > fileList.size());
+    
     std::string path;
     std::cin.clear();
     std::cout << "Enter output path: ";
     std::cin >> path;
 
-    //list file, get file entry
-    //...
-    //list file, get file entry
+    //read entry
+    f.seekg(fileList[choice - 1].second);
+    Entry *e = new Entry();
+    f.read((char*)e, sizeof(Entry));
+    
+    //export
+    ExportFile(path, e);
 
-    //export
-    //...
-    //export
+    //free memory
+    delete e;
 }
 
 void MyFileSystem::test()
 {
-    std::cout << sizeof(Entry);
-    //CreateFSPassword();
-    ImportFile();
-    // Entry *e = new Entry();
-    // f.seekg(2094080, f.beg);
-    // f.read((char*)e, sizeof(Entry));
-    // ChangeFilePassword(e, 2094080);
-    // delete e;
-
-    // ExportFile();
+    MyDeleteFile();
 }
 
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)
@@ -637,11 +644,19 @@ void MyFileSystem::Entry::SetName(const std::string& fileName, unsigned int numb
     }
 }
 
-std::string MyFileSystem::Entry::GetFullName()
+std::string MyFileSystem::Entry::GetFullName() const
 {
     std::string result(name, name + nameLen);
     result += '.' + std::string(extension, extension + FILE_EXTENSION_LENGTH);
     return result;
+}
+
+std::string MyFileSystem::Entry::GetIndex() const
+{
+    int i = ENTRY_NAME_SIZE;
+    while (name[i] != '~')
+        i--;
+    return std::string(name + i + 1, name + ENTRY_NAME_SIZE).c_str();
 }
 
 void MyFileSystem::Entry::SetHash(const std::string& hash)
@@ -650,4 +665,9 @@ void MyFileSystem::Entry::SetHash(const std::string& hash)
     {
         hashedPassword[i] = hash[i];
     }
+}
+
+std::string MyFileSystem::Entry::GetInfo() const
+{
+    return GetFullName() + "  (" + GetIndex() + ")  " + std::to_string(fileSize) + " bytes";
 }

@@ -3,7 +3,8 @@
 #include <string>
 #include <vector>
 #include <iostream>
-#include <map>
+#include <utility>
+#include <iomanip>
 
 #include "cryptlib.h"
 #include "pwdbased.h"
@@ -50,9 +51,11 @@ private:
         byte mac[16] = {0};
 
         void SetName(const std::string& fileName, unsigned int number, bool adjusted = false);
-        std::string GetFullName();
+        std::string GetFullName() const;
         void SetExtension(const std::string& fileExtension);
+        std::string GetIndex() const;
         void SetHash(const std::string& hash);
+        std::string GetInfo() const;
     };
 #pragma pack(pop)
 
@@ -89,12 +92,15 @@ private:
     void DecryptData(std::string& data, const std::string& key, Entry *&entry);
 
     //get list of file, pair of offset and entry
-    std::map<unsigned int, Entry*> GetFileList();
+    std::vector<std::pair<std::string, unsigned int>> GetFileList();
+    void PrintFileList(const std::vector<std::pair<std::string, unsigned int>>& fileList);
 
     void ImportFile(const std::string& inputPath, bool setPassword = false);
     bool CheckFilePassword(Entry *&entry, std::string& filePassword);
     void ChangeFilePassword(Entry *&entry, unsigned int offset, bool removed = false);
     void ExportFile(const std::string& outputPath, Entry *&entry);
+    void MyRestoreFile(std::string restoreName);
+    void MyDeleteFile(unsigned int bytesOffset, bool restorable = true);
 
 public:
     MyFileSystem();
@@ -104,8 +110,8 @@ public:
     void ImportFile();
     void ExportFile();
     void ListFiles();
-    void MyDeleteFile(bool restorable = true);
-
+    void MyDeleteFile();
+    void MyRestoreFile();
 
     void test();
 };
