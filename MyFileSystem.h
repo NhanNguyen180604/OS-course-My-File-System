@@ -72,8 +72,6 @@ private:
     bool CheckFSPassword(const std::string& password);
     void ChangeFSPassword();
 
-    void WriteBlock(unsigned int offset, std::string data, bool writeCluster, bool padding);
-    void WriteBlock(unsigned int offset, unsigned int data, bool writeCluster, bool padding);
     std::vector<char> ReadBlock(unsigned int offset, unsigned int size);
     bool CheckDuplicateName(Entry *&entry);
     std::vector<unsigned int> GetClustersChain(unsigned int startingCluster);
@@ -92,14 +90,14 @@ private:
     void DecryptData(std::string& data, const std::string& key, Entry *&entry);
 
     //get list of file, pair of offset and entry
-    std::vector<std::pair<std::string, unsigned int>> GetFileList();
+    std::vector<std::pair<std::string, unsigned int>> GetFileList(bool getDeleted = false);
     void PrintFileList(const std::vector<std::pair<std::string, unsigned int>>& fileList);
 
     void ImportFile(const std::string& inputPath, bool setPassword = false);
     bool CheckFilePassword(Entry *&entry, std::string& filePassword);
     void ChangeFilePassword(Entry *&entry, unsigned int offset, bool removed = false);
     void ExportFile(const std::string& outputPath, Entry *&entry);
-    void MyRestoreFile(std::string restoreName);
+    void RestoreFile(unsigned int bytesOffset);
     void MyDeleteFile(unsigned int bytesOffset, bool restorable = true);
 
 public:
@@ -107,11 +105,12 @@ public:
     ~MyFileSystem();
     
     bool CheckFSPassword();
+    void ChangeFilePassword();
     void ImportFile();
     void ExportFile();
     void ListFiles();
     void MyDeleteFile();
     void MyRestoreFile();
 
-    void test();
+    void HandleInput();
 };

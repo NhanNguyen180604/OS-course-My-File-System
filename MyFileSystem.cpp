@@ -8,36 +8,6 @@ std::vector<char> MyFileSystem::ReadBlock(unsigned int offset, unsigned int size
     return buffer;
 }
 
-void MyFileSystem::WriteBlock(unsigned int offset, std::string data, bool writeCluster, bool padding)
-{
-    f.seekp(offset, f.beg);
-    f.write(data.c_str(), data.size());
-    //add padding
-    if (padding)
-    {
-        unsigned int paddingSize = writeCluster ? sectorsPerCluster * bytesPerSector : bytesPerSector;
-        paddingSize -= data.size();
-        std::string paddingStr(paddingSize, '\0');
-        f.write(&paddingStr[0], paddingSize);
-    }
-    f.flush();
-}
-
-void MyFileSystem::WriteBlock(unsigned int offset, unsigned int data, bool writeCluster, bool padding)
-{
-    f.seekp(offset, f.beg);
-    f.write((char*)&data, sizeof(data));
-    //add padding
-    if (padding)
-    {
-        unsigned int paddingSize = writeCluster ? sectorsPerCluster * bytesPerSector : bytesPerSector;
-        paddingSize -= sizeof(data);
-        std::string paddingStr(paddingSize, '\0');
-        f.write(&paddingStr[0], paddingSize);
-    }
-    f.flush();
-}
-
 //hashing using PKCS5_PBKDF2_HMAC with SHA256
 //https://www.cryptopp.com/wiki/PKCS5_PBKDF2_HMAC
 //sample program 1
@@ -127,6 +97,7 @@ void MyFileSystem::CreateFSPassword()
     f.seekp(10, f.beg);
     bool hasPassword = true;
     f.write((char*)&hasPassword, 1);
+    this->hasPassword = hasPassword;
     
     //input password
     std::string password;
@@ -161,7 +132,7 @@ void MyFileSystem::ChangeFSPassword()
 
     if (!CheckFSPassword(password))
     {
-        std::cout << "Wrong password!\n";
+        std::cout << "Incorrect password!\n";
         return;
     }
 
@@ -181,7 +152,7 @@ bool MyFileSystem::CheckFSPassword()
             std::cin >> password;
             if (!CheckFSPassword(password))
             {
-                std::cout << "Wrong password!\n";
+                std::cout << "Incorrect password!\n";
                 attemp--;
                 std::cout << "Number of attemps left: " << attemp << '\n';
             }
@@ -491,7 +462,7 @@ bool MyFileSystem::CheckFilePassword(Entry *&entry, std::string& filePassword)
     std::string key = GenerateHash(filePassword);
     if (GenerateHash(key) != hashedPassword)
     {
-        std::cout << "Wrong password!\n";
+        std::cout << "Incorrect password!\n";
         return false;
     }
 
@@ -506,7 +477,10 @@ void MyFileSystem::ChangeFilePassword(Entry *&entry, unsigned int offset, bool r
     {
         std::string filePassword;
         if (!CheckFilePassword(entry, filePassword))
+        {
+            std::cout << "Incorrect password!\n";
             return;
+        }
 
         DecryptData(fileData, GenerateHash(filePassword), entry);
     }
@@ -523,6 +497,7 @@ void MyFileSystem::ChangeFilePassword(Entry *&entry, unsigned int offset, bool r
         entry->SetHash(doublyHashedPassword);
 
         EncryptData(fileData, hashedPassword, entry);
+        entry->hasPassword = true;
     }
     else entry->hasPassword = false;
     
@@ -533,6 +508,37 @@ void MyFileSystem::ChangeFilePassword(Entry *&entry, unsigned int offset, bool r
     f.seekp(offset, f.beg);
     f.write((char*)entry, sizeof(Entry));
     f.flush();
+}
+
+void MyFileSystem::ChangeFilePassword()
+{
+    std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList();
+    PrintFileList(fileList);
+
+    //choose file
+    int choice;
+    do
+    {
+        std::cout << "Enter which file to create/change password: ";
+        std::cin >> choice;
+    } while (choice <= 0 || choice > fileList.size());
+
+    //read entry
+    f.seekg(fileList[choice - 1].second);
+    Entry *e = new Entry();
+    f.read((char*)e, sizeof(Entry));
+
+    bool removed = false;
+    if (e->hasPassword)
+    {
+        std::cout << "Do you want to remove this file's password (1 - yes/0 - no): ";
+        std::cin >> removed;
+    }
+    
+    ChangeFilePassword(e, fileList[choice - 1].second, removed);
+
+    //free memory
+    delete e;
 }
 
 void MyFileSystem::ExportFile(const std::string& outputPath, Entry *&entry)
@@ -587,9 +593,236 @@ void MyFileSystem::ExportFile()
     delete e;
 }
 
-void MyFileSystem::test()
+std::vector<std::pair<std::string, unsigned int>> MyFileSystem::GetFileList(bool getDeleted) {
+    std::vector<std::pair<std::string, unsigned int>> fileList;
+    std::vector<unsigned int> rdetClusters = GetClustersChain(STARTING_CLUSTER);
+    for (unsigned int cluster : rdetClusters)
+    {
+        unsigned int sectorOffset = sectorsBeforeFat + fatSize + sectorsPerCluster * (cluster - STARTING_CLUSTER);
+        unsigned int bytesOffset = sectorOffset * bytesPerSector;
+        unsigned int limitOffset = bytesOffset + bytesPerSector * sectorsPerCluster;  //start of next cluster
+        for (; bytesOffset < limitOffset; bytesOffset += sizeof(Entry))
+        {
+            Entry tempEntry;
+            f.seekg(bytesOffset, f.beg);
+            f.read((char*)&tempEntry, sizeof(Entry));
+            //sign of erased file
+            if (tempEntry.name[0] == -27 && getDeleted)
+            {
+                //if the file is not restorable
+                if (tempEntry.reserved[0] == 0)
+                    continue;
+
+                //if the file is restorable
+                std::string fileName = tempEntry.GetInfo();
+                fileName[0] = tempEntry.reserved[0];
+                fileList.push_back(std::make_pair(fileName, bytesOffset));
+            }
+            //sign of empty entry
+            else if (tempEntry.name[0] == 0)
+            {
+                return fileList;
+            }
+
+            if (tempEntry.name[0] != -27 && !getDeleted)
+                fileList.push_back(std::make_pair(tempEntry.GetInfo(), bytesOffset));
+        }
+    }
+    return fileList;
+}
+
+void MyFileSystem::PrintFileList(const std::vector<std::pair<std::string, unsigned int>>& fileList)
 {
-    ListFiles();
+    int i = 1;
+    for (std::pair<std::string, int> p : fileList)
+    {
+        std::cout << i++ << ". " << p.first << '\n';
+    }
+}
+
+void MyFileSystem::ListFiles() {
+    std::vector<std::pair<std::string, unsigned int>> fileList = MyFileSystem::GetFileList();
+    PrintFileList(fileList);
+}
+
+void MyFileSystem::MyDeleteFile(unsigned int bytesOffset, bool restorable) {
+    f.seekg(bytesOffset, f.beg);
+    Entry e;
+    f.read((char*)&e, sizeof(Entry));
+
+    //check file password
+    if (e.hasPassword)
+    {
+        Entry *pE = &e;
+        std::string password;
+        if (!CheckFilePassword(pE, password))
+        {
+            std::cout << "Incorrect password!\n";
+            return;
+        }
+    }
+
+    unsigned char deleteValue = 0xE5;
+    unsigned char trueValue = e.name[0];
+    //store first byte of name if restorable
+    if (restorable)
+    {
+        f.seekp(bytesOffset + ENTRY_NAME_SIZE + FILE_EXTENSION_LENGTH, f.beg);
+        f.write((char*)&trueValue, sizeof(trueValue));
+    }
+    //mark first byte as E5
+    f.seekp(bytesOffset, f.beg);
+    f.write((char*)&deleteValue, sizeof(deleteValue));
+
+    //remove from FAT if not restorable
+    if(!restorable)
+    {
+        std::vector<unsigned int> fileClusters = GetClustersChain(e.startingCluster);
+        for (unsigned int cluster : fileClusters)
+        {
+            unsigned int fatOffset = sectorsBeforeFat * bytesPerSector + cluster * fatEntrySize; //in bytes
+            f.seekp(fatOffset, f.beg);
+            unsigned int empty = 0;
+            f.write((char*)&empty, fatEntrySize);
+        }
+    }
+    f.flush();
+}
+
+void MyFileSystem::MyDeleteFile()
+{
+    //list file
+    std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList();
+    PrintFileList(fileList);
+    std::cout << '\n';
+
+    //choose file
+    int choice;
+    do
+    {
+        std::cout << "Enter which file to delete: ";
+        std::cin >> choice;
+    } while (choice <= 0 || choice > fileList.size());
+
+    unsigned int bytesOffset = fileList[choice - 1].second;
+
+    bool restorable;
+    std::cout << "Do you want this to be restorable (1 - yes/0 - no): ";
+    std::cin >> restorable;
+    MyDeleteFile(bytesOffset, restorable);
+}
+
+void MyFileSystem::RestoreFile(unsigned int bytesOffset) {
+    f.seekg(bytesOffset, f.beg);
+    Entry e;
+    Entry *pE = nullptr;
+    f.read((char*)&e, sizeof(Entry));
+    pE = &e;
+
+    e.name[0] = e.reserved[0];
+    e.reserved[0] = 0;
+
+    //check duplicate name
+    int number = std::atoi(e.GetIndex().c_str());
+    std::string fileName(e.name, e.name + e.nameLen);
+    while (CheckDuplicateName(pE))
+    {
+        number++;
+        e.SetName(fileName, number, true);
+    }
+
+    //rewrite entry
+    f.seekp(bytesOffset, f.beg);
+    f.write((char*)&e, sizeof(Entry));
+    f.flush();
+}
+
+void MyFileSystem::MyRestoreFile() {
+    std::vector<std::pair<std::string, unsigned int>> fileList = GetFileList(true);
+    if (fileList.size() == 0)
+    {
+        std::cout << "There is no file to restore!\n";
+        return;
+    }
+
+    std::cout << "Restorable Deleted File List:\n";
+    PrintFileList(fileList);
+    std::cout << '\n';
+
+    //choose file
+    int choice;
+    do
+    {
+        std::cout << "Enter which file to restore: ";
+        std::cin >> choice;
+    } while (choice <= 0 || choice > fileList.size());
+
+    unsigned int bytesOffset = fileList[choice - 1].second;
+    RestoreFile(bytesOffset);
+}
+
+void MyFileSystem::HandleInput()
+{
+    char choice;
+    while (true)
+    {
+        std::cout << '\n';
+        std::cout << "1. Create/Change File System's password\n";
+        std::cout << "2. List files\n";
+        std::cout << "3. Create/Change a file's password\n";
+        std::cout << "4. Import a file\n";
+        std::cout << "5. Export a file\n";
+        std::cout << "6. Delete a file\n";
+        std::cout << "7. Restore a file\n";
+        std::cout << "Q. Quit\n";
+        std::cout << "\nEnter your choice: ";
+        std::cin >> choice;
+
+        switch (choice)
+        {
+            case '1':
+            {
+                if (hasPassword)
+                    ChangeFSPassword();
+                else CreateFSPassword();
+                break;
+            }
+            case '2':
+            {
+                ListFiles();
+                break;
+            }
+            case '3':
+            {
+                ChangeFilePassword();
+                break;
+            }
+            case '4':
+            {
+                ImportFile();
+                break;
+            }
+            case '5':
+            {
+                ExportFile();
+                break;
+            }
+            case '6':
+            {
+                MyDeleteFile();
+                break;
+            }
+            case '7':
+            {
+                MyRestoreFile();
+                break;
+            }
+            default:
+            {
+                return;
+            }
+        }
+    }
 }
 
 void MyFileSystem::Entry::SetExtension(const std::string& fileExtension)

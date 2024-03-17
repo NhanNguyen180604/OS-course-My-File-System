@@ -71,6 +71,6 @@ int main()
     if (!myFS.CheckFSPassword())
         return 1;
         
-    myFS.test();
+    myFS.HandleInput();
     return 0;
 }
