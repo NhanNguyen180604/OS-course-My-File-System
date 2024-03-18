@@ -101,9 +101,9 @@ void MyFileSystem::CreateFSPassword()
     
     //input password
     std::string password;
-    std::cin.clear();
     std::cout << "Enter new password: ";
     std::cin >> password;
+    std::cin.ignore();
     std::cout << "Your password for the file system will be: " << password << '\n';
     std::string hashedPassword = GenerateHash(password);
 
@@ -125,10 +125,10 @@ bool MyFileSystem::CheckFSPassword(const std::string& password)
 
 void MyFileSystem::ChangeFSPassword()
 {
-    std::cin.clear();
     std::string password;
     std::cout << "Enter file system's password: ";
     std::cin >> password;
+    std::cin.ignore();
 
     if (!CheckFSPassword(password))
     {
@@ -147,9 +147,9 @@ bool MyFileSystem::CheckFSPassword()
         std::string password;
         do
         {
-            std::cin.clear();
             std::cout << "Enter password to access file system: ";
             std::cin >> password;
+            std::cin.ignore();
             if (!CheckFSPassword(password))
             {
                 std::cout << "Incorrect password!\n";
@@ -411,7 +411,6 @@ void MyFileSystem::ImportFile(const std::string& inputPath, bool hasPassword)
         entry->hasPassword = true;
         //set password's hash
         std::string password;
-        std::cin.clear();
         std::cout << "Enter file's password: ";
         std::cin >> password;
 
@@ -441,13 +440,13 @@ void MyFileSystem::ImportFile(const std::string& inputPath, bool hasPassword)
 void MyFileSystem::ImportFile()
 {
     std::string path;
-    std::cin.clear();
     std::cout << "Enter file path: ";
-    std::cin >> path;
+    std::getline(std::cin, path);
 
     bool hasPassword;
     std::cout << "Do you want to set password? (1 - yes/0 - no): ";
     std::cin >> hasPassword;
+    std::cin.ignore();
 
     ImportFile(path, hasPassword);
 }
@@ -455,9 +454,9 @@ void MyFileSystem::ImportFile()
 bool MyFileSystem::CheckFilePassword(Entry *&entry, std::string& filePassword)
 {
     std::string hashedPassword(entry->hashedPassword, entry->hashedPassword + 32);
-    std::cin.clear();
     std::cout << "Enter file's password: ";
     std::cin >> filePassword;
+    std::cin.ignore();
 
     std::string key = GenerateHash(filePassword);
     if (GenerateHash(key) != hashedPassword)
@@ -488,9 +487,9 @@ void MyFileSystem::ChangeFilePassword(Entry *&entry, unsigned int offset, bool r
     if (!removed)
     {
         std::string newPassword;
-        std::cin.clear();
         std::cout << "Enter file's new password: ";
         std::cin >> newPassword;
+        std::cin.ignore();
 
         std::string hashedPassword = GenerateHash(newPassword);
         std::string doublyHashedPassword = GenerateHash(hashedPassword);
@@ -526,6 +525,7 @@ void MyFileSystem::ChangeFilePassword()
     {
         std::cout << "Enter which file to create/change password: ";
         std::cin >> choice;
+        std::cin.ignore();
     } while (choice <= 0 || choice > fileList.size());
 
     //read entry
@@ -538,6 +538,7 @@ void MyFileSystem::ChangeFilePassword()
     {
         std::cout << "Do you want to remove this file's password (1 - yes/0 - no): ";
         std::cin >> removed;
+        std::cin.ignore();
     }
     
     ChangeFilePassword(e, fileList[choice - 1].second, removed);
@@ -584,12 +585,14 @@ void MyFileSystem::ExportFile()
     {
         std::cout << "Enter which file to export: ";
         std::cin >> choice;
+        std::cin.ignore();
     } while (choice <= 0 || choice > fileList.size());
     
     std::string path;
-    std::cin.clear();
     std::cout << "Enter output path: ";
-    std::cin >> path;
+    std::getline(std::cin, path);
+    if (path[path.size() - 1] != '\\')
+        path += '\\';
 
     //read entry
     f.seekg(fileList[choice - 1].second);
@@ -724,6 +727,7 @@ void MyFileSystem::MyDeleteFile()
     {
         std::cout << "Enter which file to delete: ";
         std::cin >> choice;
+        std::cin.ignore();
     } while (choice <= 0 || choice > fileList.size());
 
     unsigned int bytesOffset = fileList[choice - 1].second;
@@ -731,6 +735,7 @@ void MyFileSystem::MyDeleteFile()
     bool restorable;
     std::cout << "Do you want this to be restorable (1 - yes/0 - no): ";
     std::cin >> restorable;
+    std::cin.ignore();
     MyDeleteFile(bytesOffset, restorable);
 }
 
@@ -779,6 +784,7 @@ void MyFileSystem::MyRestoreFile()
     {
         std::cout << "Enter which file to restore: ";
         std::cin >> choice;
+        std::cin.ignore();
     } while (choice <= 0 || choice > fileList.size());
 
     unsigned int bytesOffset = fileList[choice - 1].second;
@@ -801,6 +807,7 @@ void MyFileSystem::HandleInput()
         std::cout << "Q. Quit\n";
         std::cout << "\nEnter your choice: ";
         std::cin >> choice;
+        std::cin.ignore();
 
         switch (choice)
         {
